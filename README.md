@@ -17,36 +17,88 @@ mcp-platform/
 
 ## Setup
 
-Requirements: Docker Desktop with Compose `include` support, `uv`, and `make`.
+Requirements: Docker Desktop with Compose `include` support and `uv`.
 Start Docker Desktop before running these commands.
+These steps assume a fresh clone. Keep your existing `.env` when updating an existing installation.
 
-From the `mcp-platform` directory, initialize configuration if needed:
+### 1. Clone the repository
 
 ```bash
-make -C contextforge setup
-ln -s contextforge/.env .env
+git clone https://github.com/sdanutha/mcp-context-forge.git mcp-platform
+cd mcp-platform
 ```
 
-The root `.env` points to `contextforge/.env`. Set these values in that file for local development:
+### 2. Configure secrets and pull the Gateway image
 
-```dotenv
+```bash
+cp contextforge/.env.example contextforge/.env
+ln -s contextforge/.env .env
+
+# Use Python 3.12 instead of the macOS system Python.
+(
+  cd contextforge
+  uv run --no-project --python 3.12 --with python-dotenv \
+    python -m mcpgateway.scripts.init_secrets --patch-env .env
+)
+
+# Pull the pre-built Gateway image; no local Gateway build is required.
+docker pull ghcr.io/ibm/mcp-context-forge:latest
+
+# Use the image for the Gateway, migrations, and registration jobs.
+cat >> .env <<'ENV'
+
+IMAGE_LOCAL=ghcr.io/ibm/mcp-context-forge:latest
 GUNICORN_WORKERS=2
 GATEWAY_REPLICAS=1
 COMPOSE_PROFILES=ui
+ENV
 ```
 
-Build and start the stack:
+Secret initialization replaces weak values for `JWT_SECRET_KEY`, `AUTH_ENCRYPTION_SECRET`, and the configured passwords.
+The root `.env` is a symlink to `contextforge/.env`; both paths refer to the same configuration.
+
+### 3. Build local images and start the stack
+
+Nginx and the two custom MCP servers need local builds. Other images are pulled as needed.
 
 ```bash
-docker compose up -d --build
+docker compose build nginx add_mcp dates_mcp
+docker compose up -d --no-build
 ```
 
-Open:
+### 4. Check status
+
+```bash
+docker compose ps -a
+```
+
+Registration and migration jobs exit with code `0` after completing their work.
+
+### 5. View logs
+
+```bash
+docker compose logs -f gateway
+```
+
+### 6. Open the UI
 
 - [Admin UI](http://localhost:8080/admin/): manage gateways, tools, and virtual servers.
 - [Web UI](http://localhost:3001): separate frontend for ContextForge.
 
-Use `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` from `.env` to sign in.
+Sign in with `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` from `.env`.
+
+### 7. Generate an API token (optional)
+
+Use Admin UI to create a token with the required team and permissions.
+For local development, this command generates an administrator token that expires after seven days:
+
+```bash
+docker compose exec gateway sh -c \
+  'python3 -m mcpgateway.utils.create_jwt_token --username "$PLATFORM_ADMIN_EMAIL" --admin --exp 10080'
+```
+
+The command uses the signing configuration inside the Gateway container.
+It prints the token; keep it private and use it as an `Authorization: Bearer` header.
 
 ## Example MCP servers
 
