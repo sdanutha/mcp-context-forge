@@ -4,6 +4,9 @@
 # the plugin config, and the MCP catalog mounted into the Gateway.
 name: neomcp
 
+# Gateway release used by the Gateway, migration, and registration jobs. Change the tag here to upgrade.
+x-gateway-image: &gateway_image ghcr.io/ibm/mcp-context-forge:v1.1.1
+
 networks:
   mcpnet:
     name: neomcp-mcpnet
@@ -19,7 +22,7 @@ services:
   # PostgreSQL - primary database
   postgres:
     container_name: neomcp-postgres
-    image: postgres:18
+    image: postgres:18.7
     command:
     - postgres
     - -c
@@ -89,7 +92,7 @@ services:
   # PgBouncer - connection pool in front of PostgreSQL
   pgbouncer:
     container_name: neomcp-pgbouncer
-    image: edoburu/pgbouncer:latest
+    image: edoburu/pgbouncer:v1.26.1-p0
     restart: unless-stopped
     depends_on:
       postgres:
@@ -142,7 +145,7 @@ services:
   # Redis - Gateway cache and session coordination
   redis:
     container_name: neomcp-redis
-    image: redis:latest
+    image: redis:8.10.3
     command:
     - redis-server
     - --maxmemory
@@ -185,7 +188,7 @@ services:
   # One-shot database bootstrap; the Gateway waits for it
   migration:
     container_name: neomcp-migration
-    image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
+    image: *gateway_image
     build:
       context: ./contextforge
       dockerfile: Containerfile
@@ -220,7 +223,7 @@ services:
   # No nginx and no legacy /admin UI: manage everything through the Web UI on port 3001.
   gateway:
     container_name: neomcp-gateway
-    image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
+    image: *gateway_image
     build:
       context: ./contextforge
       dockerfile: Containerfile
@@ -501,7 +504,7 @@ services:
   # Web UI session store
   web_ui_redis:
     container_name: neomcp-web-ui-redis
-    image: redis:latest
+    image: redis:8.10.3
     restart: unless-stopped
     command:
     - redis-server
@@ -553,7 +556,7 @@ services:
   # Registers fast_time_server with the Gateway and creates its virtual server (one-shot)
   register_fast_time:
     container_name: neomcp-register-fast-time
-    image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
+    image: *gateway_image
     networks: [mcpnet]
     depends_on:
       gateway:
@@ -875,7 +878,7 @@ services:
 
   register_add_mcp: &mcp_registration
     container_name: neomcp-register-add-mcp
-    image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
+    image: *gateway_image
     restart: "no"
     networks: [mcpnet]
     depends_on:

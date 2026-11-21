@@ -22,7 +22,7 @@ Start Docker Desktop before running these commands.
 These steps assume you have already cloned the repository and are in its root folder.
 Keep your existing `.env` when updating an existing installation.
 
-### 1. Configure secrets and pull the Gateway image
+### 1. Configure secrets
 
 ```bash
 cp contextforge/.env.example contextforge/.env
@@ -35,13 +35,8 @@ ln -s contextforge/.env .env
     python -m mcpgateway.scripts.init_secrets --patch-env .env
 )
 
-# Pull the pre-built Gateway image; no local Gateway build is required.
-docker pull ghcr.io/ibm/mcp-context-forge:latest
-
-# Use the image for the Gateway, migrations, and registration jobs.
 cat >> .env <<'ENV'
 
-IMAGE_LOCAL=ghcr.io/ibm/mcp-context-forge:latest
 GUNICORN_WORKERS=2
 GATEWAY_REPLICAS=1
 ENV
@@ -56,7 +51,8 @@ The root `.env` is a symlink to `contextforge/.env`; both paths refer to the sam
 docker compose up -d
 ```
 
-The first run builds the custom MCP images from `mcps/` and pulls the other images as needed.
+The first run builds the custom MCP images from `mcps/` and pulls the other images.
+Every image uses a pinned version tag; the Gateway version is set once by `x-gateway-image` at the top of `docker-compose.yml`.
 
 ### 3. Check status
 
