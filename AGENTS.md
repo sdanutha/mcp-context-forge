@@ -6,6 +6,7 @@ Write responses, comments, and documentation in English.
 
 This repository runs ContextForge and custom MCP servers through the root `docker-compose.yml`.
 
+- Create or integrate an MCP by following `.agents/skills/mcp-creator/SKILL.md`; it applies the rules below and verifies the result.
 - Put custom MCP implementations under `mcps/<name>/`.
 - Keep ContextForge application code under `contextforge/`; see "Protected: contextforge/" below.
 - Reuse `mcps/register.py` for automatic registration.
