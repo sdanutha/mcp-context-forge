@@ -1,9 +1,854 @@
+# One-file deployment: ContextForge, Web UI, and custom MCP servers.
+# Run everything from the repository root with `docker compose up -d`.
+# The Gateway image comes from IMAGE_LOCAL; contextforge/ is only used for the optional local build,
+# the plugin config, and the MCP catalog mounted into the Gateway.
 name: mcp-context-forge
 
-include:
-  - path: ./contextforge/docker-compose.yml
+networks:
+  mcpnet:
+    driver: bridge
+
+volumes:
+  pgdata:
+  web_ui_redis_data:
 
 services:
+  # PostgreSQL - primary database
+  postgres:
+    image: postgres:18
+    command:
+    - postgres
+    - -c
+    - max_connections=800
+    - -c
+    - shared_buffers=512MB
+    - -c
+    - work_mem=16MB
+    - -c
+    - effective_cache_size=1536MB
+    - -c
+    - maintenance_work_mem=128MB
+    - -c
+    - checkpoint_completion_target=0.9
+    - -c
+    - wal_buffers=16MB
+    - -c
+    - random_page_cost=1.1
+    - -c
+    - effective_io_concurrency=200
+    - -c
+    - max_worker_processes=8
+    - -c
+    - max_parallel_workers_per_gather=4
+    - -c
+    - max_parallel_workers=8
+    - -c
+    - idle_in_transaction_session_timeout=300s
+    - -c
+    - statement_timeout=120s
+    - -c
+    - synchronous_commit=off
+    - -c
+    - commit_delay=100
+    networks: [mcpnet]
+    ports:
+    - 5433:5432
+    environment:
+    - POSTGRES_USER=postgres
+    - POSTGRES_PASSWORD=mysecretpassword
+    - POSTGRES_DB=mcp
+    volumes:
+    - pgdata:/var/lib/postgresql
+    healthcheck:
+      interval: 30s
+      retries: 5
+      start_period: 20s
+      test: [CMD-SHELL, pg_isready -U $$POSTGRES_USER]
+      timeout: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 2G
+    shm_size: 256m
+    ulimits:
+      nofile:
+        hard: 8192
+        soft: 8192
+      nproc:
+        hard: 5000
+        soft: 5000
+
+  # PgBouncer - connection pool in front of PostgreSQL
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [mcpnet]
+    ports:
+    - 6432:6432
+    environment:
+    - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@postgres:5432/mcp
+    - LISTEN_PORT=6432
+    - POOL_MODE=transaction
+    - MAX_CLIENT_CONN=5000
+    - DEFAULT_POOL_SIZE=600
+    - MIN_POOL_SIZE=100
+    - RESERVE_POOL_SIZE=150
+    - RESERVE_POOL_TIMEOUT=2
+    - MAX_DB_CONNECTIONS=700
+    - MAX_USER_CONNECTIONS=700
+    - SERVER_LIFETIME=3600
+    - SERVER_IDLE_TIMEOUT=600
+    - QUERY_WAIT_TIMEOUT=60
+    - CLIENT_IDLE_TIMEOUT=120
+    - SERVER_CONNECT_TIMEOUT=5
+    - SERVER_RESET_QUERY=DISCARD ALL
+    - SERVER_RESET_QUERY_ALWAYS=1
+    - IDLE_TRANSACTION_TIMEOUT=30
+    - AUTH_TYPE=scram-sha-256
+    healthcheck:
+      interval: 10s
+      retries: 3
+      start_period: 10s
+      test: [CMD, pg_isready, -h, localhost, -p, '6432']
+      timeout: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    ulimits:
+      nofile:
+        hard: 65536
+        soft: 65536
+      nproc:
+        hard: 5000
+        soft: 5000
+
+  # Redis - Gateway cache and session coordination
+  redis:
+    image: redis:latest
+    command:
+    - redis-server
+    - --maxmemory
+    - 1gb
+    - --maxmemory-policy
+    - allkeys-lru
+    - --tcp-backlog
+    - '2048'
+    - --timeout
+    - '0'
+    - --tcp-keepalive
+    - '300'
+    - --maxclients
+    - '15000'
+    networks: [mcpnet]
+    ports:
+    - 6379:6379
+    healthcheck:
+      interval: 5s
+      retries: 10
+      start_period: 10s
+      test: [CMD, redis-cli, ping]
+      timeout: 3s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    ulimits:
+      nofile:
+        hard: 65536
+        soft: 65536
+      nproc:
+        hard: 5000
+        soft: 5000
+
+  # One-shot database bootstrap; the Gateway waits for it
+  migration:
+    image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
+    build:
+      context: ./contextforge
+      dockerfile: Containerfile
+    restart: 'no'
+    command:
+    - python
+    - -m
+    - mcpgateway.bootstrap_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [mcpnet]
+    environment:
+    - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@postgres:5432/mcp
+    - GATEWAY_TOOL_NAME_SEPARATOR=${GATEWAY_TOOL_NAME_SEPARATOR:--}
+    - 'JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is not set. Run: make setup (first time) or make init-secrets-patch-env (if .env exists)}'
+    - BASIC_AUTH_USER=${BASIC_AUTH_USER:-admin}
+    - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-admin@example.com}
+    - 'PLATFORM_ADMIN_PASSWORD=${PLATFORM_ADMIN_PASSWORD:?PLATFORM_ADMIN_PASSWORD is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}'
+    - 'DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:?DEFAULT_USER_PASSWORD is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}'
+    - AUTH_REQUIRED=${AUTH_REQUIRED:-true}
+    - 'AUTH_ENCRYPTION_SECRET=${AUTH_ENCRYPTION_SECRET:?AUTH_ENCRYPTION_SECRET is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}'
+    - MCP_LIST_PAGE_SIZE=${MCP_LIST_PAGE_SIZE:-100}
+    - MCP_LIST_CURSOR_TTL_SECONDS=${MCP_LIST_CURSOR_TTL_SECONDS:-900}
+    - MCP_PROXY_LIST_MAX_SNAPSHOT_BYTES=${MCP_PROXY_LIST_MAX_SNAPSHOT_BYTES:-67108864}
+    - MCP_PROXY_LIST_MAX_TOTAL_BYTES=${MCP_PROXY_LIST_MAX_TOTAL_BYTES:-134217728}
+    - MCP_PROXY_LIST_MAX_COLLECTORS=${MCP_PROXY_LIST_MAX_COLLECTORS:-32}
+    - MCP_PROXY_LIST_MAX_SNAPSHOTS=${MCP_PROXY_LIST_MAX_SNAPSHOTS:-64}
+    - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+  # ContextForge Gateway - API and MCP endpoints on host port 4444 (keep GATEWAY_REPLICAS=1 while the port is published).
+  # No nginx and no legacy /admin UI: manage everything through the Web UI on port 3001.
+  gateway:
+    image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
+    build:
+      context: ./contextforge
+      dockerfile: Containerfile
+    restart: unless-stopped
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks: [mcpnet]
+    ports:
+    - ${GATEWAY_PORT:-4444}:4444
+    environment:
+    - APP_DOMAIN=http://localhost:${GATEWAY_PORT:-4444}
+    - HOST=${GATEWAY_HOST:-0.0.0.0}
+    - TRANSPORT_TYPE=streamablehttp
+    - GATEWAY_TOOL_NAME_SEPARATOR=${GATEWAY_TOOL_NAME_SEPARATOR:--}
+    - MCPGATEWAY_MCP_APPS_ENABLED=${MCPGATEWAY_MCP_APPS_ENABLED:-false}
+    - MCP_INBOUND_PROTOCOL_MODE=${MCP_INBOUND_PROTOCOL_MODE:-auto}
+    - MCPGATEWAY_WS_RELAY_ENABLED=${MCPGATEWAY_WS_RELAY_ENABLED:-false}
+    - MCPGATEWAY_REVERSE_PROXY_ENABLED=${MCPGATEWAY_REVERSE_PROXY_ENABLED:-false}
+    - ENABLE_METRICS=${ENABLE_METRICS:-true}
+    - SSRF_ALLOW_LOCALHOST=${SSRF_ALLOW_LOCALHOST:-true}
+    - SSRF_ALLOW_PRIVATE_NETWORKS=${SSRF_ALLOW_PRIVATE_NETWORKS:-true}
+    - SSRF_DNS_FAIL_CLOSED=${SSRF_DNS_FAIL_CLOSED:-false}
+    - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@pgbouncer:6432/mcp}
+    - MCPGATEWAY_SKIP_MIGRATIONS=${MCPGATEWAY_SKIP_MIGRATIONS:-true}
+    - SQLALCHEMY_ECHO=false
+    - CACHE_TYPE=redis
+    - REDIS_URL=redis://redis:6379/0
+    - REDIS_PARSER=hiredis
+    - REDIS_MAX_CONNECTIONS=50
+    - REDIS_SOCKET_TIMEOUT=5.0
+    - REDIS_SOCKET_CONNECT_TIMEOUT=5.0
+    - REDIS_HEALTH_CHECK_INTERVAL=30
+    - REDIS_MAX_RETRIES=30
+    - REDIS_RETRY_INTERVAL_MS=2000
+    - REDIS_MAX_BACKOFF_SECONDS=30
+    - AUTH_CACHE_ENABLED=${AUTH_CACHE_ENABLED:-true}
+    - AUTH_CACHE_USER_TTL=300
+    - AUTH_CACHE_REVOCATION_TTL=120
+    - AUTH_CACHE_TEAM_TTL=300
+    - AUTH_CACHE_ROLE_TTL=300
+    - AUTH_CACHE_BATCH_QUERIES=true
+    - AUTH_CACHE_TEAMS_TTL=300
+    - REGISTRY_CACHE_ENABLED=true
+    - REGISTRY_CACHE_TOOLS_TTL=300
+    - REGISTRY_CACHE_PROMPTS_TTL=300
+    - REGISTRY_CACHE_RESOURCES_TTL=300
+    - REGISTRY_CACHE_AGENTS_TTL=300
+    - REGISTRY_CACHE_SERVERS_TTL=300
+    - REGISTRY_CACHE_GATEWAYS_TTL=300
+    - REGISTRY_CACHE_CATALOG_TTL=300
+    - ADMIN_STATS_CACHE_ENABLED=true
+    - ADMIN_STATS_CACHE_SYSTEM_TTL=60
+    - ADMIN_STATS_CACHE_OBSERVABILITY_TTL=30
+    - ADMIN_STATS_CACHE_TAGS_TTL=120
+    - ADMIN_STATS_CACHE_PLUGINS_TTL=120
+    - ADMIN_STATS_CACHE_PERFORMANCE_TTL=60
+    - TEAM_MEMBER_COUNT_CACHE_ENABLED=true
+    - TEAM_MEMBER_COUNT_CACHE_TTL=300
+    - METRICS_CACHE_ENABLED=true
+    - METRICS_CACHE_TTL_SECONDS=120
+    - HEALTH_CHECK_INTERVAL=300
+    - HEALTH_CHECK_TIMEOUT=5
+    - UNHEALTHY_THRESHOLD=3
+    - GATEWAY_VALIDATION_TIMEOUT=5
+    - MAX_CONCURRENT_HEALTH_CHECKS=10
+    - AUTO_REFRESH_SERVERS=true
+    - GATEWAY_AUTO_REFRESH_INTERVAL=300
+    - HOT_COLD_CLASSIFICATION_ENABLED=true
+    - JWT_ALGORITHM=HS256
+    - 'JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}'
+    - JWT_AUDIENCE=mcpgateway-api
+    - JWT_ISSUER=mcpgateway
+    - 'AUTH_ENCRYPTION_SECRET=${AUTH_ENCRYPTION_SECRET:?AUTH_ENCRYPTION_SECRET is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}'
+    - MCP_LIST_PAGE_SIZE=${MCP_LIST_PAGE_SIZE:-100}
+    - MCP_LIST_CURSOR_TTL_SECONDS=${MCP_LIST_CURSOR_TTL_SECONDS:-900}
+    - MCP_PROXY_LIST_MAX_SNAPSHOT_BYTES=${MCP_PROXY_LIST_MAX_SNAPSHOT_BYTES:-67108864}
+    - MCP_PROXY_LIST_MAX_TOTAL_BYTES=${MCP_PROXY_LIST_MAX_TOTAL_BYTES:-134217728}
+    - MCP_PROXY_LIST_MAX_COLLECTORS=${MCP_PROXY_LIST_MAX_COLLECTORS:-32}
+    - MCP_PROXY_LIST_MAX_SNAPSHOTS=${MCP_PROXY_LIST_MAX_SNAPSHOTS:-64}
+    - 'DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:?DEFAULT_USER_PASSWORD is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}'
+    - EMAIL_AUTH_ENABLED=true
+    - PROTECT_ALL_ADMINS=${PROTECT_ALL_ADMINS:-true}
+    - PLATFORM_ADMIN_EMAIL=${PLATFORM_ADMIN_EMAIL:-admin@example.com}
+    - 'PLATFORM_ADMIN_PASSWORD=${PLATFORM_ADMIN_PASSWORD:?PLATFORM_ADMIN_PASSWORD is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}'
+    - PASSWORD_CHANGE_ENFORCEMENT_ENABLED=${PASSWORD_CHANGE_ENFORCEMENT_ENABLED:-true}
+    - ACCOUNT_LOCKOUT_NOTIFICATION_ENABLED=${ACCOUNT_LOCKOUT_NOTIFICATION_ENABLED:-true}
+    - PASSWORD_RESET_ENABLED=${PASSWORD_RESET_ENABLED:-true}
+    - PASSWORD_RESET_TOKEN_EXPIRY_MINUTES=${PASSWORD_RESET_TOKEN_EXPIRY_MINUTES:-60}
+    - PASSWORD_RESET_RATE_LIMIT=${PASSWORD_RESET_RATE_LIMIT:-5}
+    - PASSWORD_RESET_RATE_WINDOW_MINUTES=${PASSWORD_RESET_RATE_WINDOW_MINUTES:-15}
+    - PASSWORD_RESET_INVALIDATE_SESSIONS=${PASSWORD_RESET_INVALIDATE_SESSIONS:-true}
+    - PASSWORD_RESET_MIN_RESPONSE_MS=${PASSWORD_RESET_MIN_RESPONSE_MS:-250}
+    - SMTP_ENABLED=${SMTP_ENABLED:-false}
+    - SMTP_HOST=${SMTP_HOST:-}
+    - SMTP_PORT=${SMTP_PORT:-587}
+    - SMTP_USER=${SMTP_USER:-}
+    - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+    - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-}
+    - SMTP_FROM_NAME=${SMTP_FROM_NAME:-ContextForge}
+    - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+    - SMTP_USE_SSL=${SMTP_USE_SSL:-false}
+    - SMTP_TIMEOUT_SECONDS=${SMTP_TIMEOUT_SECONDS:-15}
+    - SSO_ENABLED=${SSO_ENABLED:-false}
+    - SSO_KEYCLOAK_ENABLED=${SSO_KEYCLOAK_ENABLED:-false}
+    - SSO_KEYCLOAK_BASE_URL=${SSO_KEYCLOAK_BASE_URL:-http://keycloak:8080}
+    - SSO_KEYCLOAK_PUBLIC_BASE_URL=${SSO_KEYCLOAK_PUBLIC_BASE_URL:-}
+    - SSO_KEYCLOAK_REALM=${SSO_KEYCLOAK_REALM:-mcp-gateway}
+    - SSO_KEYCLOAK_CLIENT_ID=${SSO_KEYCLOAK_CLIENT_ID:-mcp-gateway}
+    - SSO_KEYCLOAK_CLIENT_SECRET=${SSO_KEYCLOAK_CLIENT_SECRET:-keycloak-dev-secret}
+    - SSO_KEYCLOAK_MAP_REALM_ROLES=${SSO_KEYCLOAK_MAP_REALM_ROLES:-true}
+    - SSO_KEYCLOAK_MAP_CLIENT_ROLES=${SSO_KEYCLOAK_MAP_CLIENT_ROLES:-false}
+    - SSO_KEYCLOAK_GROUPS_CLAIM=${SSO_KEYCLOAK_GROUPS_CLAIM:-groups}
+    - SSO_KEYCLOAK_ROLE_MAPPINGS=${SSO_KEYCLOAK_ROLE_MAPPINGS:-{}}
+    - SSO_KEYCLOAK_DEFAULT_ROLE=${SSO_KEYCLOAK_DEFAULT_ROLE:-}
+    - SSO_KEYCLOAK_RESOLVE_TEAM_SCOPE_TO_PERSONAL_TEAM=${SSO_KEYCLOAK_RESOLVE_TEAM_SCOPE_TO_PERSONAL_TEAM:-false}
+    - SSO_API_TOKEN_AUTH_ENABLED=${SSO_API_TOKEN_AUTH_ENABLED:-false}
+    - SSO_AUTO_CREATE_USERS=${SSO_AUTO_CREATE_USERS:-true}
+    - SSO_PRESERVE_ADMIN_AUTH=${SSO_PRESERVE_ADMIN_AUTH:-true}
+    - REQUIRE_TOKEN_EXPIRATION=${REQUIRE_TOKEN_EXPIRATION:-true}
+    - REQUIRE_JTI=${REQUIRE_JTI:-true}
+    - REQUIRE_USER_IN_DB=${REQUIRE_USER_IN_DB:-false}
+    - MCPGATEWAY_UI_ENABLED=false
+    - MCPGATEWAY_ADMIN_API_ENABLED=false
+    - MCPGATEWAY_UI_EMBEDDED=false
+    - MCPGATEWAY_UI_HIDE_SECTIONS=
+    - MCPGATEWAY_UI_HIDE_HEADER_ITEMS=
+    - MCPGATEWAY_UI_HIDE_SECTIONS_ADMIN=
+    - MCPGATEWAY_UI_HIDE_HEADER_ITEMS_ADMIN=
+    - ENVIRONMENT=${ENVIRONMENT:-development}
+    - SECURITY_HEADERS_ENABLED=true
+    - CORS_ALLOW_CREDENTIALS=true
+    - SECURE_COOKIES=false
+    - USE_STATEFUL_SESSIONS=true
+    - MCPGATEWAY_SESSION_AFFINITY_ENABLED=true
+    - PLUGINS_ENABLED=true
+    - PLUGINS_CONFIG_FILE=${PLUGINS_CONFIG_FILE:-plugins/config.yaml}
+    - PLUGINS_CAN_OVERRIDE_AUTH_HEADERS=${PLUGINS_CAN_OVERRIDE_AUTH_HEADERS:-false}
+    - PRIMARY_WORKER_ELECTION_BACKEND=${PRIMARY_WORKER_ELECTION_BACKEND:-filelock}
+    - PRIMARY_WORKER_REDIS_UNAVAILABLE_POLICY=${PRIMARY_WORKER_REDIS_UNAVAILABLE_POLICY:-fail_closed}
+    - STREAMABLE_HTTP_MAX_EVENTS_PER_STREAM=${STREAMABLE_HTTP_MAX_EVENTS_PER_STREAM:-100}
+    - MCPGATEWAY_CATALOG_ENABLED=true
+    - MCPGATEWAY_CATALOG_FILE=/app/mcp-catalog.yml
+    - AUTH_REQUIRED=true
+    - MCP_CLIENT_AUTH_ENABLED=true
+    - MCP_REQUIRE_AUTH=true
+    - TRUST_PROXY_AUTH=false
+    - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+    - LOG_LEVEL=${LOG_LEVEL:-ERROR}
+    - DISABLE_ACCESS_LOG=true
+    - TEMPLATES_AUTO_RELOAD=false
+    - STRUCTURED_LOGGING_DATABASE_ENABLED=false
+    - AUDIT_TRAIL_ENABLED=false
+    - SECURITY_LOGGING_ENABLED=false
+    - SECURITY_LOGGING_LEVEL=failures_only
+    - COMPRESSION_ENABLED=false
+    - VALIDATION_MIDDLEWARE_ENABLED=false
+    - JSON_SCHEMA_VALIDATION_STRICT=true
+    - TOOL_DESCRIPTION_FORBIDDEN_PATTERNS_ENABLED=${TOOL_DESCRIPTION_FORBIDDEN_PATTERNS_ENABLED:-true}
+    - TOOL_DESCRIPTION_FORBIDDEN_PATTERNS=${TOOL_DESCRIPTION_FORBIDDEN_PATTERNS:-["&&", ";", "||", "$(", "> ", "< "]}
+    - CORRELATION_ID_ENABLED=false
+    - LLMCHAT_ENABLED=true
+    - OBSERVABILITY_ENABLED=false
+    - DB_POOL_CLASS=queue
+    - DB_POOL_PRE_PING=true
+    - DB_POOL_SIZE=20
+    - DB_MAX_OVERFLOW=10
+    - DB_POOL_TIMEOUT=60
+    - DB_POOL_RECYCLE=60
+    - DB_MAX_RETRIES=30
+    - DB_RETRY_INTERVAL_MS=2000
+    - DB_MAX_BACKOFF_SECONDS=30
+    - TOOL_TIMEOUT=60
+    - MAX_TOOL_RETRIES=3
+    - TOOL_RATE_LIMIT=60000
+    - TOOL_CONCURRENT_LIMIT=1000
+    - RATE_LIMITING_ENABLED=${RATE_LIMITING_ENABLED:-false}
+    - FEDERATION_TIMEOUT=30
+    - HTTPX_MAX_CONNECTIONS=${HTTPX_MAX_CONNECTIONS:-500}
+    - HTTPX_MAX_KEEPALIVE_CONNECTIONS=${HTTPX_MAX_KEEPALIVE_CONNECTIONS:-300}
+    - HTTPX_KEEPALIVE_EXPIRY=30.0
+    - HTTPX_CONNECT_TIMEOUT=5.0
+    - HTTPX_READ_TIMEOUT=120.0
+    - HTTPX_WRITE_TIMEOUT=30.0
+    - HTTPX_POOL_TIMEOUT=10.0
+    - HTTPX_HTTP2_ENABLED=false
+    - HTTPX_ADMIN_READ_TIMEOUT=30.0
+    - GUNICORN_WORKERS=${GUNICORN_WORKERS:-17}
+    - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
+    - GUNICORN_GRACEFUL_TIMEOUT=${GUNICORN_GRACEFUL_TIMEOUT:-60}
+    - GUNICORN_KEEP_ALIVE=${GUNICORN_KEEP_ALIVE:-30}
+    - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000000}
+    - GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER:-100000}
+    - GUNICORN_BACKLOG=${GUNICORN_BACKLOG:-4096}
+    - MCP_SESSION_POOL_ENABLED=${MCP_SESSION_POOL_ENABLED:-true}
+    - MCP_SESSION_POOL_MAX_PER_KEY=10
+    - MCP_SESSION_POOL_TTL=300.0
+    - MCP_SESSION_POOL_HEALTH_CHECK_INTERVAL=60.0
+    - MCP_SESSION_POOL_ACQUIRE_TIMEOUT=60.0
+    - MCP_SESSION_POOL_CREATE_TIMEOUT=30.0
+    - MCP_SESSION_POOL_CIRCUIT_BREAKER_THRESHOLD=5
+    - MCP_SESSION_POOL_CIRCUIT_BREAKER_RESET=60.0
+    - MCP_SESSION_POOL_IDLE_EVICTION=600.0
+    - MCP_SESSION_POOL_TRANSPORT_TIMEOUT=30.0
+    - MCP_SESSION_POOL_EXPLICIT_HEALTH_RPC=false
+    - MCP_SESSION_POOL_HEALTH_CHECK_METHODS=["ping", "skip"]
+    - MCP_SESSION_POOL_HEALTH_CHECK_TIMEOUT=5.0
+    - MCP_SESSION_POOL_MAX_TOTAL_KEYS=0
+    - MCP_SESSION_POOL_MAX_TOTAL_SESSIONS=0
+    - MCP_SESSION_POOL_JWT_IDENTITY_EXTRACTION=true
+    - SSE_SEND_TIMEOUT=30.0
+    - SSE_RAPID_YIELD_WINDOW_MS=1000
+    - SSE_RAPID_YIELD_MAX=50
+    - DB_METRICS_RECORDING_ENABLED=${DB_METRICS_RECORDING_ENABLED:-true}
+    - LOG_FORMAT=${LOG_FORMAT:-text}
+    - OTEL_ENABLE_OBSERVABILITY=${OTEL_ENABLE_OBSERVABILITY:-false}
+    - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-otlp}
+    - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4317}
+    - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
+    - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-mcp-gateway}
+    - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=docker,service.namespace=mcp}
+    - OTEL_SYSTEM_TRACES_ENABLED=${OTEL_SYSTEM_TRACES_ENABLED:-false}
+    - OTEL_HTTPX_INSTRUMENTATION_ENABLED=${OTEL_HTTPX_INSTRUMENTATION_ENABLED:-true}
+    - OTEL_SQLALCHEMY_INSTRUMENTATION_ENABLED=${OTEL_SQLALCHEMY_INSTRUMENTATION_ENABLED:-false}
+    - OTEL_REDIS_INSTRUMENTATION_ENABLED=${OTEL_REDIS_INSTRUMENTATION_ENABLED:-false}
+    - UI_BASE_URL=http://localhost:${WEB_UI_PORT:-3001}/app
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    volumes:
+    - ./contextforge/mcp-catalog.yml:/app/mcp-catalog.yml:ro
+    - ${PLUGINS_DIR:-./contextforge/plugins}:/app/plugins:ro
+    healthcheck:
+      interval: 30s
+      retries: 5
+      start_period: 30s
+      test:
+      - CMD
+      - python3
+      - -c
+      - import urllib.request; import json; resp = urllib.request.urlopen('http://localhost:4444/health', timeout=5); data = json.loads(resp.read()); exit(0 if data.get('status') == 'healthy' else 1)
+      timeout: 10s
+    deploy:
+      mode: replicated
+      replicas: ${GATEWAY_REPLICAS:-1}
+      resources:
+        limits:
+          cpus: ${GATEWAY_CPU_LIMIT:-8}
+          memory: ${GATEWAY_MEM_LIMIT:-8G}
+        reservations:
+          cpus: ${GATEWAY_CPU_RESERVATION:-4}
+          memory: ${GATEWAY_MEM_RESERVATION:-4G}
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    - apparmor=docker-default
+    privileged: false
+    read_only: true
+    tmpfs:
+    - /tmp:size=100M,mode=1777
+    - /var/tmp:size=50M,mode=1777
+    - /run:size=10M,mode=0755
+    sysctls:
+    - net.ipv4.tcp_fin_timeout=15
+    - net.ipv4.ip_local_port_range=1024 65535
+    ulimits:
+      nofile:
+        hard: 65535
+        soft: 65535
+      nproc:
+        hard: 5000
+        soft: 5000
+
+  # Web UI session store
+  web_ui_redis:
+    image: redis:latest
+    restart: unless-stopped
+    command:
+    - redis-server
+    - --appendonly
+    - 'yes'
+    networks: [mcpnet]
+    volumes:
+    - web_ui_redis_data:/data
+    healthcheck:
+      interval: 5s
+      retries: 10
+      start_period: 10s
+      test: [CMD, redis-cli, ping]
+      timeout: 3s
+
+  # Web UI - the only management UI, http://localhost:3001/app/
+  web_ui:
+    image: ${WEB_UI_IMAGE:-ghcr.io/contextforge-org/contextforge-web-ui:0.3.1@sha256:f223f74ffba8398e292348f633139302f68e3e6a5521ba3b0d59bde84c8cde8b}
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+      web_ui_redis:
+        condition: service_healthy
+    networks: [mcpnet]
+    ports:
+    - ${WEB_UI_PORT:-3001}:${WEB_UI_PORT:-3001}
+    environment:
+    - PORT=${WEB_UI_PORT:-3001}
+    - HOST=${WEB_UI_HOST:-0.0.0.0}
+    - CONTEXTFORGE_URL=${WEB_UI_CONTEXTFORGE_URL:-http://gateway:4444}
+    - COOKIE_SECURE=${WEB_UI_COOKIE_SECURE:-false}
+    - REDIS_URL=${WEB_UI_REDIS_URL:-redis://web_ui_redis:6379/0}
+
+  # Fast Time Server - example MCP server from IBM, registered by register_fast_time
+  fast_time_server:
+    image: ${FAST_TIME_IMAGE:-ghcr.io/ibm/cfex-mcp-fast-time-server@sha256:30a1a177aaedec68f3bc1e26807e4dea59afd508366f852aea87f0a703c72b01} # pragma: allowlist secret
+    restart: unless-stopped
+    networks: [mcpnet]
+    ports:
+      - "8888:9080"    # Map host port 8888 to container port 9080
+    # Configured via environment variables (Streamable HTTP at /mcp)
+    environment:
+      - BIND_ADDRESS=0.0.0.0:9080
+      - RUST_LOG=info
+
+  # Registers fast_time_server with the Gateway and creates its virtual server (one-shot)
+  register_fast_time:
+    image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
+    networks: [mcpnet]
+    depends_on:
+      gateway:
+        condition: service_healthy
+      fast_time_server:
+        condition: service_started
+    environment:
+      - "JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is not set. Run: make setup (first time) or make init-secrets-patch-env (if .env exists)}"
+      - "AUTH_ENCRYPTION_SECRET=${AUTH_ENCRYPTION_SECRET:?AUTH_ENCRYPTION_SECRET is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}"  # pragma: allowlist secret
+      - MCP_LIST_PAGE_SIZE=${MCP_LIST_PAGE_SIZE:-100}
+      - MCP_LIST_CURSOR_TTL_SECONDS=${MCP_LIST_CURSOR_TTL_SECONDS:-900}
+      - MCP_PROXY_LIST_MAX_SNAPSHOT_BYTES=${MCP_PROXY_LIST_MAX_SNAPSHOT_BYTES:-67108864}
+      - MCP_PROXY_LIST_MAX_TOTAL_BYTES=${MCP_PROXY_LIST_MAX_TOTAL_BYTES:-134217728}
+      - MCP_PROXY_LIST_MAX_COLLECTORS=${MCP_PROXY_LIST_MAX_COLLECTORS:-32}
+      - MCP_PROXY_LIST_MAX_SNAPSHOTS=${MCP_PROXY_LIST_MAX_SNAPSHOTS:-64}
+      # create_jwt_token instantiates Settings(), which fails closed on the default "changeme"
+      # platform_admin_password/default_user_password once email_auth_enabled (default true).
+      - "PLATFORM_ADMIN_PASSWORD=${PLATFORM_ADMIN_PASSWORD:?PLATFORM_ADMIN_PASSWORD is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}"  # pragma: allowlist secret
+      - "DEFAULT_USER_PASSWORD=${DEFAULT_USER_PASSWORD:?DEFAULT_USER_PASSWORD is not set. Run: make setup (if .env does not exist) or make init-secrets-patch-env (if .env exists)}"  # pragma: allowlist secret
+      - "GATEWAY_URL=${GATEWAY_URL:-http://gateway:4444}"
+
+    # This is a one-shot container that exits after registration
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Using latest gateway image with current JWT utility..."
+
+        echo "Waiting for services to be ready..."
+
+        # Wait for gateway to be ready using Python
+        python3 -c "
+        import os
+        import ssl
+        import time
+        import urllib.error
+        import urllib.request
+
+        gateway_url = os.environ.get('GATEWAY_URL', 'http://gateway:4444').rstrip('/')
+        ca_cert = os.environ.get('GATEWAY_CA_CERT')
+        ssl_context = ssl.create_default_context(cafile=ca_cert) if ca_cert else None
+        if ssl_context is not None:
+            ssl_context.check_hostname = False
+
+        for i in range(1, 61):
+            try:
+                request_kwargs = {'timeout': 2}
+                if ssl_context is not None:
+                    request_kwargs['context'] = ssl_context
+                with urllib.request.urlopen(f'{gateway_url}/health', **request_kwargs) as response:
+                    if response.status == 200:
+                        print('✅ gateway is healthy')
+                        break
+            except:
+                pass
+            print(f'Waiting for gateway... ({i}/60)')
+            time.sleep(2)
+        else:
+            print('❌ Gateway failed to become healthy')
+            exit(1)
+        "
+
+        # Wait for fast_time_server to be ready using Python
+        python3 -c "
+        import time
+        import urllib.request
+        import urllib.error
+
+        for i in range(1, 31):
+            try:
+                with urllib.request.urlopen('http://fast_time_server:9080/health', timeout=2) as response:
+                    if response.status == 200:
+                        print('✅ fast_time_server is healthy')
+                        break
+            except:
+                pass
+            print(f'Waiting for fast_time_server... ({i}/30)')
+            time.sleep(2)
+        else:
+            print('❌ Fast time server failed to become healthy')
+            exit(1)
+        "
+
+        echo "Generating JWT token..."
+        echo "Environment: JWT_SECRET_KEY=[redacted]"
+        echo "Running: python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --admin --exp 10080 --secret [redacted] --algo HS256"
+        # Only capture stdout (the token), let warnings go to stderr
+        export MCPGATEWAY_BEARER_TOKEN=$$(python3 -m mcpgateway.utils.create_jwt_token --username admin@example.com --admin --exp 10080 --secret $$JWT_SECRET_KEY --algo HS256 2>/dev/null)
+        echo "Generated token: $$MCPGATEWAY_BEARER_TOKEN"
+
+        # Decode the token to verify it has expiration
+        echo "Decoding token to verify claims..."
+        python3 -m mcpgateway.utils.create_jwt_token --decode "$$MCPGATEWAY_BEARER_TOKEN" 2>/dev/null || echo "Failed to decode token"
+
+        # Wait for authenticated gateway readiness. /health goes green before the
+        # admin/bootstrap path is fully ready for authenticated registration calls.
+        echo "Waiting for authenticated gateway readiness..."
+
+        # Use Python to make HTTP requests
+        python3 -c "
+        import json
+        import os
+        import ssl
+        import sys
+        import time
+        import urllib.error
+        import urllib.request
+
+        token = os.environ.get('MCPGATEWAY_BEARER_TOKEN', '')
+        gateway_url = os.environ.get('GATEWAY_URL', 'http://gateway:4444').rstrip('/')
+        ca_cert = os.environ.get('GATEWAY_CA_CERT')
+        ssl_context = ssl.create_default_context(cafile=ca_cert) if ca_cert else None
+        if ssl_context is not None:
+            ssl_context.check_hostname = False
+
+        def open_url(request, timeout):
+            request_kwargs = {'timeout': timeout}
+            if ssl_context is not None:
+                request_kwargs['context'] = ssl_context
+            return urllib.request.urlopen(request, **request_kwargs)
+
+
+        def api_request(method, path, data=None):
+            '''Helper to make authenticated API requests.'''
+            url = f'{gateway_url}{path}'
+            req = urllib.request.Request(url, method=method)
+            req.add_header('Authorization', f'Bearer {token}')
+            req.add_header('Content-Type', 'application/json')
+            if data:
+                req.data = json.dumps(data).encode('utf-8')
+            with open_url(req, 60) as response:
+                return json.loads(response.read().decode('utf-8'))
+
+        def api_request_with_retry(method, path, data=None, retries=30, delay=2, retry_statuses=(401, 502, 503)):
+            '''Retry authenticated API requests while gateway workers settle.'''
+            for attempt in range(1, retries + 1):
+                try:
+                    return api_request(method, path, data)
+                except urllib.error.HTTPError as exc:
+                    if exc.code in retry_statuses and attempt < retries:
+                        print(f'Retrying {method} {path} after HTTP {exc.code} ({attempt}/{retries})')
+                        time.sleep(delay)
+                        continue
+                    raise
+                except Exception:
+                    if attempt < retries:
+                        print(f'Retrying {method} {path} after transient error ({attempt}/{retries})')
+                        time.sleep(delay)
+                        continue
+                    raise
+
+        print('Checking authenticated gateway readiness...')
+        for i in range(1, 61):
+            try:
+                gateways = api_request('GET', '/gateways')
+                print(f'✅ Authenticated gateway readiness confirmed ({len(gateways)} gateways visible)')
+                break
+            except urllib.error.HTTPError as exc:
+                print(f'Authenticated readiness not ready yet ({i}/60): HTTP {exc.code}')
+            except Exception as exc:
+                print(f'Authenticated readiness not ready yet ({i}/60): {exc}')
+            time.sleep(2)
+        else:
+            print('❌ Gateway authenticated readiness check failed')
+            sys.exit(1)
+
+        # Register fast_time_server with gateway using Streamable HTTP transport
+        print('Registering fast_time_server with gateway (Streamable HTTP)...')
+
+        # First check if gateway already exists. Reuse it on reruns so
+        # repeated compose up operations stay idempotent.
+        gateway_id = None
+        try:
+            gateways = api_request_with_retry('GET', '/gateways')
+            for gw in gateways:
+                if gw.get('name') == 'fast_time':
+                    gateway_id = gw['id']
+                    print(f'Reusing existing gateway {gateway_id}')
+                    break
+        except Exception as e:
+            print(f'Note: Could not check existing gateway: {e}')
+
+        # Delete existing virtual server if present (using fixed ID)
+        VIRTUAL_SERVER_ID = '9779b6698cbd4b4995ee04a4fab38737'  # pragma: allowlist secret
+        try:
+            api_request_with_retry('DELETE', f'/servers/{VIRTUAL_SERVER_ID}', retry_statuses=(401, 502, 503))
+            print(f'Deleted existing virtual server {VIRTUAL_SERVER_ID}')
+        except Exception as e:
+            print(f'Note: No existing virtual server to delete (or error: {e})')
+
+        # Register the gateway when it is not already present with synced tools.
+        if gateway_id is None:
+            try:
+                result = api_request_with_retry('POST', '/gateways', {
+                    'name': 'fast_time',
+                    'url': 'http://fast_time_server:9080/mcp',
+                    'transport': 'STREAMABLEHTTP'
+                })
+                print(f'Registration response: {result}')
+                if 'id' in result:
+                    gateway_id = result['id']
+                    print(f'✅ Successfully registered fast_time_server (gateway_id: {gateway_id})')
+                else:
+                    print('❌ Registration failed - no ID in response')
+                    sys.exit(1)
+            except Exception as e:
+                print(f'❌ Registration failed: {e}')
+                sys.exit(1)
+
+        # Force immediate discovery before polling for synced catalog entries.
+        try:
+            refresh_result = api_request_with_retry(
+                'POST',
+                f'/gateways/{gateway_id}/tools/refresh?include_resources=true&include_prompts=true',
+                retries=20,
+                delay=2,
+                retry_statuses=(401, 409, 502, 503),
+            )
+            print(f'Refresh response: {refresh_result}')
+        except Exception as e:
+            print(f'Note: manual refresh did not complete immediately: {e}')
+
+        # Wait for tools to be synced from the gateway
+        print('Waiting for tools/resources/prompts to sync...')
+        for i in range(60):
+            time.sleep(1)
+            try:
+                tools = api_request('GET', '/tools')
+                # Filter tools from fast_time gateway (note: camelCase gatewayId)
+                fast_time_tools = [t for t in tools if t.get('gatewayId') == gateway_id]
+                if fast_time_tools:
+                    print(f'Found {len(fast_time_tools)} tools from fast_time gateway')
+                    break
+            except Exception as e:
+                pass
+            print(f'Waiting for sync... ({i+1}/60)')
+        else:
+            print('❌ Tools from fast_time gateway did not sync in time')
+            sys.exit(1)
+
+        # Fetch all tools, resources, and prompts for the fast_time gateway only.
+        # API payloads may expose either gatewayId (camelCase) or gateway_id (snake_case)
+        # depending on the serializer path, so accept both.
+        tool_ids = []
+        resource_ids = []
+        prompt_ids = []
+
+        try:
+            tools = api_request('GET', '/tools')
+            # Get tools from the fast_time gateway
+            tool_ids = [t['id'] for t in tools if t.get('gatewayId') == gateway_id]
+            print(f'Found tools: {[t[\"name\"] for t in tools if t.get(\"gatewayId\") == gateway_id]}')
+        except Exception as e:
+            print(f'Failed to fetch tools: {e}')
+
+        if not tool_ids:
+            print('❌ fast_time gateway sync completed without any tools; aborting virtual server creation')
+            sys.exit(1)
+
+        try:
+            resources = api_request('GET', '/resources')
+            fast_time_resources = [r for r in resources if r.get('gatewayId') == gateway_id or r.get('gateway_id') == gateway_id]
+            resource_ids = [r['id'] for r in fast_time_resources]
+            print(f'Found resources: {[r[\"name\"] for r in fast_time_resources]}')
+        except Exception as e:
+            print(f'Failed to fetch resources: {e}')
+
+        try:
+            prompts = api_request('GET', '/prompts')
+            fast_time_prompts = [p for p in prompts if p.get('gatewayId') == gateway_id or p.get('gateway_id') == gateway_id]
+            prompt_ids = [p['id'] for p in fast_time_prompts]
+            print(f'Found prompts: {[p[\"name\"] for p in fast_time_prompts]}')
+        except Exception as e:
+            print(f'Failed to fetch prompts: {e}')
+
+        # Create virtual server with all tools, resources, and prompts
+        print('Creating virtual server...')
+        try:
+            # API expects payload wrapped in 'server' key
+            # Use fixed UUID for consistent server ID across restarts
+            server_payload = {
+                'server': {
+                    'id': '9779b6698cbd4b4995ee04a4fab38737',  # pragma: allowlist secret
+                    'name': 'Fast Time Server',
+                    'description': 'Virtual server exposing Fast Time MCP tools, resources, and prompts',
+                    'associated_tools': tool_ids,
+                    'associated_resources': resource_ids,
+                    'associated_prompts': prompt_ids
+                }
+            }
+            result = api_request_with_retry('POST', '/servers', server_payload)
+            print(f'Virtual server created: {result}')
+            print(f'✅ Successfully created virtual server with {len(tool_ids)} tools, {len(resource_ids)} resources, {len(prompt_ids)} prompts')
+        except Exception as e:
+            print(f'❌ Failed to create virtual server: {e}')
+            sys.exit(1)
+        "
+
+        # Write the bearer token to a file for load testing
+        echo "Writing bearer token to /tmp/gateway-token.txt..."
+        echo "$$MCPGATEWAY_BEARER_TOKEN" > /tmp/gateway-token.txt
+        echo "Token written to /tmp/gateway-token.txt"
+
+        echo "✅ Setup complete!"
+
+  # Custom MCP servers and their registration jobs (see AGENTS.md)
   add_mcp:
     build: ./mcps/add
     image: mcp-platform/add:local

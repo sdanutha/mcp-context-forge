@@ -6,9 +6,9 @@ Run ContextForge and custom MCP servers with one Docker Compose command.
 
 ```text
 mcp-platform/
-├── docker-compose.yml    # Main entry point; includes ContextForge services
+├── docker-compose.yml    # The only Compose file: ContextForge, Web UI, and MCP servers
 ├── .env                  # Symlink to contextforge/.env
-├── contextforge/         # ContextForge Gateway, UI, and infrastructure
+├── contextforge/         # ContextForge source, plugin config, and MCP catalog
 └── mcps/
     ├── register.py       # Automatic MCP registration
     ├── add/              # Integer addition MCP
@@ -17,7 +17,7 @@ mcp-platform/
 
 ## Setup
 
-Requirements: Docker Desktop with Compose `include` support and `uv`.
+Requirements: Docker Desktop with Compose v2 and `uv`.
 Start Docker Desktop before running these commands.
 These steps assume a fresh clone. Keep your existing `.env` when updating an existing installation.
 
@@ -50,7 +50,6 @@ cat >> .env <<'ENV'
 IMAGE_LOCAL=ghcr.io/ibm/mcp-context-forge:latest
 GUNICORN_WORKERS=2
 GATEWAY_REPLICAS=1
-COMPOSE_PROFILES=ui
 ENV
 ```
 
@@ -59,10 +58,10 @@ The root `.env` is a symlink to `contextforge/.env`; both paths refer to the sam
 
 ### 3. Build local images and start the stack
 
-Nginx and the two custom MCP servers need local builds. Other images are pulled as needed.
+The two custom MCP servers need local builds. Other images are pulled as needed.
 
 ```bash
-docker compose build nginx add_mcp dates_mcp
+docker compose build add_mcp dates_mcp
 docker compose up -d --no-build
 ```
 
@@ -82,14 +81,19 @@ docker compose logs -f gateway
 
 ### 6. Open the UI
 
-- [Admin UI](http://localhost:8080/admin/): manage gateways, tools, and virtual servers.
-- [Web UI](http://localhost:3001): separate frontend for ContextForge.
-
+Open the [Web UI](http://localhost:3001/app/) to manage MCP servers, tools, virtual servers, users, and tokens.
 Sign in with `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` from `.env`.
+
+| Host port | Service | Use |
+| --- | --- | --- |
+| `3001` | `web_ui` | Web UI, the only management UI |
+| `4444` | `gateway` | Gateway API and virtual server MCP endpoints |
+
+The stack has no nginx and no legacy Admin UI at `/admin`; both are removed in [docker-compose.yml](docker-compose.yml).
 
 ### 7. Generate an API token (optional)
 
-Use Admin UI to create a token with the required team and permissions.
+Use the Web UI Tokens page to create a token with the required team and permissions.
 For local development, this command generates an administrator token that expires after seven days:
 
 ```bash
@@ -99,6 +103,9 @@ docker compose exec gateway sh -c \
 
 The command uses the signing configuration inside the Gateway container.
 It prints the token; keep it private and use it as an `Authorization: Bearer` header.
+
+MCP clients connect to a virtual server at `http://localhost:4444/servers/<server-id>/mcp`.
+Find the server ID in the Web UI.
 
 ## Example MCP servers
 
@@ -134,4 +141,4 @@ docker compose down
 
 Run commands from `mcp-platform`, using the root Compose file.
 To add another MCP, create a folder under `mcps/` and add its server and registration services to `docker-compose.yml`.
-If tool definitions change, refresh the gateway tools in Admin UI and update the virtual server's selected tools.
+If tool definitions change, refresh the MCP server's tools in the Web UI and update the virtual server's selected tools.
