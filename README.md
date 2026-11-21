@@ -84,22 +84,6 @@ Sign in with `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` from `.env`.
 
 The stack has no nginx and no legacy Admin UI at `/admin`; both are removed in [docker-compose.yml](docker-compose.yml).
 
-### 6. Generate an API token (optional)
-
-Use the Web UI Tokens page to create a token with the required team and permissions.
-For local development, this command generates an administrator token that expires after seven days:
-
-```bash
-docker compose exec gateway sh -c \
-  'python3 -m mcpgateway.utils.create_jwt_token --username "$PLATFORM_ADMIN_EMAIL" --admin --exp 10080'
-```
-
-The command uses the signing configuration inside the Gateway container.
-It prints the token; keep it private and use it as an `Authorization: Bearer` header.
-
-MCP clients connect to a virtual server at `http://localhost:4444/servers/<server-id>/mcp`.
-Find the server ID in the Web UI.
-
 ## Example MCP servers
 
 The stack starts `fast_time_server`, `add_mcp`, and `dates_mcp`.
