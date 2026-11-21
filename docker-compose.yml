@@ -9,7 +9,7 @@ x-gateway-image: &gateway_image ghcr.io/ibm/mcp-context-forge:v1.1.1
 
 networks:
   mcpnet:
-    name: neomcp-mcpnet
+    name: neomcp-net
     driver: bridge
 
 volumes:
