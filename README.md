@@ -82,8 +82,8 @@ The stack has no nginx and no legacy Admin UI at `/admin`; both are removed in [
 
 ## Example MCP servers
 
-The stack starts `fast_time_server`, `add_mcp`, and `dates_mcp`.
-Registration services automatically add the custom MCP servers and create their virtual servers.
+The stack starts `add_mcp` and `dates_mcp`.
+Registration services automatically add them to ContextForge and create their virtual servers.
 Registration containers exit successfully after setup; they do not need to stay running.
 
 | Virtual server | Tool | Example arguments | Result |
