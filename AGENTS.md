@@ -7,10 +7,22 @@ Write responses, comments, and documentation in English.
 This repository runs ContextForge and custom MCP servers through the root `docker-compose.yml`.
 
 - Put custom MCP implementations under `mcps/<name>/`.
-- Keep ContextForge application code under `contextforge/`.
+- Keep ContextForge application code under `contextforge/`; see "Protected: contextforge/" below.
 - Reuse `mcps/register.py` for automatic registration.
 - Keep one Git repository at the project root.
 - Keep secrets in the ignored `.env`, which links to `contextforge/.env`.
+
+## Protected: contextforge/
+
+`contextforge/` is the main upstream code project, a copy of the IBM ContextForge repository.
+Do not modify anything in it. Only the user may change it, for example to update it to the current upstream version.
+
+- Do not edit, add, delete, rename, or reformat files under `contextforge/`, including its Compose files, Containerfile, plugins, catalog, docs, and tests.
+- Do all platform and MCP work outside it: in `mcps/`, the root `docker-compose.yml`, and the root `README.md`.
+- Change Gateway behavior through the root `docker-compose.yml` (environment variables, ports, mounts) instead of patching `contextforge/`.
+- Read `contextforge/` freely to understand its behavior and settings.
+- The ignored `contextforge/.env` secrets file is the one exception: it is local configuration, not upstream code, and it is not committed.
+- If a task seems to need a change inside `contextforge/`, stop and tell the user what is needed and why. Do not make the change.
 
 ## Add an existing MCP implementation
 
