@@ -2,7 +2,7 @@
 # Run everything from the repository root with `docker compose up -d`.
 # The Gateway image comes from IMAGE_LOCAL; contextforge/ is only used for the optional local build,
 # the plugin config, and the MCP catalog mounted into the Gateway.
-name: mcp-context-forge
+name: neomcp
 
 networks:
   mcpnet:
@@ -851,7 +851,7 @@ services:
   # Custom MCP servers and their registration jobs (see AGENTS.md)
   add_mcp:
     build: ./mcps/add
-    image: mcp-platform/add:local
+    image: neomcp/add:local
     restart: unless-stopped
     networks: [mcpnet]
     healthcheck:
@@ -888,7 +888,7 @@ services:
 
   dates_mcp:
     build: ./mcps/dates
-    image: mcp-platform/dates:local
+    image: neomcp/dates:local
     restart: unless-stopped
     networks: [mcpnet]
     healthcheck:

@@ -69,7 +69,7 @@ Add this under the root `services:` mapping, after the existing registration anc
 ```yaml
   example_mcp:
     build: ./mcps/example
-    image: mcp-platform/example:local
+    image: neomcp/example:local
     restart: unless-stopped
     networks: [mcpnet]
     healthcheck:

@@ -1,11 +1,11 @@
-# MCP Platform
+# NeoMCP
 
 Run ContextForge and custom MCP servers with one Docker Compose command.
 
 ## Project structure
 
 ```text
-mcp-platform/
+neomcp/
 ├── docker-compose.yml    # The only Compose file: ContextForge, Web UI, and MCP servers
 ├── .env                  # Symlink to contextforge/.env
 ├── contextforge/         # ContextForge source, plugin config, and MCP catalog
@@ -24,8 +24,8 @@ These steps assume a fresh clone. Keep your existing `.env` when updating an exi
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/sdanutha/mcp-context-forge.git mcp-platform
-cd mcp-platform
+git clone https://github.com/sdanutha/mcp-context-forge.git neomcp
+cd neomcp
 ```
 
 ### 2. Configure secrets and pull the Gateway image
@@ -139,6 +139,6 @@ docker compose up -d --build add_mcp dates_mcp
 docker compose down
 ```
 
-Run commands from `mcp-platform`, using the root Compose file.
+Run commands from `neomcp`, using the root Compose file.
 To add another MCP, create a folder under `mcps/` and add its server and registration services to `docker-compose.yml`.
 If tool definitions change, refresh the MCP server's tools in the Web UI and update the virtual server's selected tools.
