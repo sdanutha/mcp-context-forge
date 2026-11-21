@@ -19,16 +19,10 @@ neomcp/
 
 Requirements: Docker Desktop with Compose v2 and `uv`.
 Start Docker Desktop before running these commands.
-These steps assume a fresh clone. Keep your existing `.env` when updating an existing installation.
+These steps assume you have already cloned the repository and are in its root folder.
+Keep your existing `.env` when updating an existing installation.
 
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/sdanutha/mcp-context-forge.git neomcp
-cd neomcp
-```
-
-### 2. Configure secrets and pull the Gateway image
+### 1. Configure secrets and pull the Gateway image
 
 ```bash
 cp contextforge/.env.example contextforge/.env
@@ -56,16 +50,15 @@ ENV
 Secret initialization replaces weak values for `JWT_SECRET_KEY`, `AUTH_ENCRYPTION_SECRET`, and the configured passwords.
 The root `.env` is a symlink to `contextforge/.env`; both paths refer to the same configuration.
 
-### 3. Build local images and start the stack
-
-The two custom MCP servers need local builds. Other images are pulled as needed.
+### 2. Start the stack
 
 ```bash
-docker compose build add_mcp dates_mcp
-docker compose up -d --no-build
+docker compose up -d
 ```
 
-### 4. Check status
+The first run builds the custom MCP images from `mcps/` and pulls the other images as needed.
+
+### 3. Check status
 
 ```bash
 docker compose ps -a
@@ -73,13 +66,13 @@ docker compose ps -a
 
 Registration and migration jobs exit with code `0` after completing their work.
 
-### 5. View logs
+### 4. View logs
 
 ```bash
 docker compose logs -f gateway
 ```
 
-### 6. Open the UI
+### 5. Open the UI
 
 Open the [Web UI](http://localhost:3001/app/) to manage MCP servers, tools, virtual servers, users, and tokens.
 Sign in with `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` from `.env`.
@@ -91,7 +84,7 @@ Sign in with `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` from `.env`.
 
 The stack has no nginx and no legacy Admin UI at `/admin`; both are removed in [docker-compose.yml](docker-compose.yml).
 
-### 7. Generate an API token (optional)
+### 6. Generate an API token (optional)
 
 Use the Web UI Tokens page to create a token with the required team and permissions.
 For local development, this command generates an administrator token that expires after seven days:

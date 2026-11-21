@@ -60,7 +60,7 @@ Do not modify anything in it. Only the user may change it, for example to update
    If upstream MCP authentication is required, extend the shared registration flow to support it before declaring integration complete.
 
 7. Validate the integration using the checks below.
-   Update the root README example table and explicit image-build command to include the new MCP.
+   Update the root README example table to include the new MCP.
 
 ## Compose template
 

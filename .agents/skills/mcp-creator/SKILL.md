@@ -51,9 +51,9 @@ Done when `docker compose config --quiet` passes and both services are on `mcpne
 
 ### 4. README
 
-Add the MCP to the example table (virtual server, tool, example arguments, result) and to the `docker compose build` command in the root `README.md`.
+Add the MCP to the example table (virtual server, tool, example arguments, result) in the root `README.md`.
 
-Done when both README spots list the new MCP.
+Done when the table lists the new MCP.
 
 ### 5. Verify
 
@@ -69,7 +69,7 @@ Run the `AGENTS.md` validation commands, then prove each completion check with o
 - Repeat registration with `docker compose up -d register_<name>_mcp`, then confirm one gateway and one virtual server carry the name (`GET /gateways`, `GET /servers`).
 - Run an existing MCP's tool through its virtual server to confirm nothing regressed.
 
-Done when each `AGENTS.md` completion check has observed evidence, or is listed as unverified with the reason (for example Docker not running, or `.env` missing, which README step 2 creates).
+Done when each `AGENTS.md` completion check has observed evidence, or is listed as unverified with the reason (for example Docker not running, or `.env` missing, which README step 1 creates).
 
 ### 6. Report
 
