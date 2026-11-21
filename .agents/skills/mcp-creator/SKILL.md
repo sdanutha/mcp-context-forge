@@ -47,7 +47,7 @@ Done when the MCP path (`/mcp`), port, and readiness endpoint are identified and
 
 Append the two services from the `AGENTS.md` "Compose template" at the end of `docker-compose.yml`, below the existing registration services so the `mcp_registration` and `registration_environment` anchors are already defined.
 
-Done when `docker compose config --quiet` passes and both services are on `mcpnet`.
+Done when `docker compose config --quiet` passes, both services are on `mcpnet`, and each has a `container_name` of the form `neomcp-<service-with-hyphens>`.
 
 ### 4. README
 

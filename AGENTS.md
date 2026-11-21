@@ -49,6 +49,7 @@ Do not modify anything in it. Only the user may change it, for example to update
 5. Add the server and registration services to the root `docker-compose.yml`.
    Use the template below, replacing the service name, folder, image, display names, port, and paths.
    Keep service names unique and stable.
+   Set `container_name` to `neomcp-` plus the service name with hyphens instead of underscores, with no replica suffix.
    Place both services on `mcpnet`.
    Internal MCP services need no published host ports.
 
@@ -70,6 +71,7 @@ Add this under the root `services:` mapping, after the existing registration anc
   example_mcp:
     build: ./mcps/example
     image: neomcp/example:local
+    container_name: neomcp-example-mcp
     restart: unless-stopped
     networks: [mcpnet]
     healthcheck:
@@ -80,6 +82,7 @@ Add this under the root `services:` mapping, after the existing registration anc
 
   register_example_mcp:
     <<: *mcp_registration
+    container_name: neomcp-register-example-mcp
     depends_on:
       gateway:
         condition: service_healthy

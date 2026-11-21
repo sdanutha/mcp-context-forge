@@ -6,15 +6,19 @@ name: neomcp
 
 networks:
   mcpnet:
+    name: neomcp-mcpnet
     driver: bridge
 
 volumes:
   pgdata:
+    name: neomcp-pgdata
   web_ui_redis_data:
+    name: neomcp-web-ui-redis-data
 
 services:
   # PostgreSQL - primary database
   postgres:
+    container_name: neomcp-postgres
     image: postgres:18
     command:
     - postgres
@@ -84,6 +88,7 @@ services:
 
   # PgBouncer - connection pool in front of PostgreSQL
   pgbouncer:
+    container_name: neomcp-pgbouncer
     image: edoburu/pgbouncer:latest
     restart: unless-stopped
     depends_on:
@@ -136,6 +141,7 @@ services:
 
   # Redis - Gateway cache and session coordination
   redis:
+    container_name: neomcp-redis
     image: redis:latest
     command:
     - redis-server
@@ -178,6 +184,7 @@ services:
 
   # One-shot database bootstrap; the Gateway waits for it
   migration:
+    container_name: neomcp-migration
     image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
     build:
       context: ./contextforge
@@ -212,6 +219,7 @@ services:
   # ContextForge Gateway - API and MCP endpoints on host port 4444 (keep GATEWAY_REPLICAS=1 while the port is published).
   # No nginx and no legacy /admin UI: manage everything through the Web UI on port 3001.
   gateway:
+    container_name: neomcp-gateway
     image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
     build:
       context: ./contextforge
@@ -492,6 +500,7 @@ services:
 
   # Web UI session store
   web_ui_redis:
+    container_name: neomcp-web-ui-redis
     image: redis:latest
     restart: unless-stopped
     command:
@@ -510,6 +519,7 @@ services:
 
   # Web UI - the only management UI, http://localhost:3001/app/
   web_ui:
+    container_name: neomcp-web-ui
     image: ${WEB_UI_IMAGE:-ghcr.io/contextforge-org/contextforge-web-ui:0.3.1@sha256:f223f74ffba8398e292348f633139302f68e3e6a5521ba3b0d59bde84c8cde8b}
     restart: unless-stopped
     depends_on:
@@ -529,6 +539,7 @@ services:
 
   # Fast Time Server - example MCP server from IBM, registered by register_fast_time
   fast_time_server:
+    container_name: neomcp-fast-time-server
     image: ${FAST_TIME_IMAGE:-ghcr.io/ibm/cfex-mcp-fast-time-server@sha256:30a1a177aaedec68f3bc1e26807e4dea59afd508366f852aea87f0a703c72b01} # pragma: allowlist secret
     restart: unless-stopped
     networks: [mcpnet]
@@ -541,6 +552,7 @@ services:
 
   # Registers fast_time_server with the Gateway and creates its virtual server (one-shot)
   register_fast_time:
+    container_name: neomcp-register-fast-time
     image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
     networks: [mcpnet]
     depends_on:
@@ -850,6 +862,7 @@ services:
 
   # Custom MCP servers and their registration jobs (see AGENTS.md)
   add_mcp:
+    container_name: neomcp-add-mcp
     build: ./mcps/add
     image: neomcp/add:local
     restart: unless-stopped
@@ -861,6 +874,7 @@ services:
       retries: 12
 
   register_add_mcp: &mcp_registration
+    container_name: neomcp-register-add-mcp
     image: ${IMAGE_LOCAL:-mcpgateway/mcpgateway:latest}
     restart: "no"
     networks: [mcpnet]
@@ -887,6 +901,7 @@ services:
     entrypoint: [python, /registration/register.py]
 
   dates_mcp:
+    container_name: neomcp-dates-mcp
     build: ./mcps/dates
     image: neomcp/dates:local
     restart: unless-stopped
@@ -898,6 +913,7 @@ services:
       retries: 12
 
   register_dates_mcp:
+    container_name: neomcp-register-dates-mcp
     <<: *mcp_registration
     depends_on:
       gateway:
