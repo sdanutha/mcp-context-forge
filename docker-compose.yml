@@ -59,10 +59,10 @@ services:
     - commit_delay=100
     networks: [mcpnet]
     ports:
-    - 5433:5432
+    - ${POSTGRES_PORT:-5433}:5432
     environment:
     - POSTGRES_USER=postgres
-    - POSTGRES_PASSWORD=mysecretpassword
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mysecretpassword}
     - POSTGRES_DB=mcp
     volumes:
     - pgdata:/var/lib/postgresql
@@ -109,7 +109,7 @@ services:
     - '15000'
     networks: [mcpnet]
     ports:
-    - 6379:6379
+    - ${REDIS_PORT:-6379}:6379
     healthcheck:
       interval: 5s
       retries: 10
