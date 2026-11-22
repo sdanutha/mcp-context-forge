@@ -9,6 +9,7 @@ neomcp/
 ├── docker-compose.yml    # The only Compose file: ContextForge, Web UI, and MCP servers
 ├── .env                  # Symlink to contextforge/.env
 ├── contextforge/         # ContextForge source, plugin config, and MCP catalog
+├── data/                 # Local data folders (git-ignored): PostgreSQL and Web UI session data
 └── mcps/
     ├── register.py       # Automatic MCP registration
     ├── add/              # Integer addition MCP
@@ -50,6 +51,8 @@ Next, set the login, passwords, and ports in `.env` before the first start. Ever
 | Gateway API and MCP endpoint port | `GATEWAY_PORT` | `4444` |
 | PostgreSQL port | `POSTGRES_PORT` | `5433` |
 | Redis port | `REDIS_PORT` | `6379` |
+| PostgreSQL data folder | `POSTGRES_DATA_DIR` | `./data/pg-data` |
+| Web UI session data folder | `WEB_UI_DATA_DIR` | `./data/webui-data` |
 
 When a variable appears twice in `.env`, the later line wins, so you can append your choices to the end of the file:
 
@@ -60,6 +63,7 @@ PLATFORM_ADMIN_PASSWORD=<your admin password>
 POSTGRES_PASSWORD=<your database password>
 WEB_UI_PORT=3001
 GATEWAY_PORT=4444
+POSTGRES_DATA_DIR=/path/to/postgres-data
 ENV
 ```
 
@@ -67,7 +71,9 @@ ENV
 - PostgreSQL and Redis are published on the host, so set `POSTGRES_PASSWORD` instead of keeping the default.
 - Use upper and lower case letters, digits, and symbols in the admin password; the Gateway warns about weak ones.
 - The admin email and password apply when the admin account is first created. Afterwards, change the password in the Web UI; editing `.env` does not change an existing account.
-- `POSTGRES_PASSWORD` applies when the database volume `neomcp-pg-data` is first created. Changing it later requires deleting that volume, which erases all data.
+- The data folders are real folders on your machine, created on first start. A relative path starts at the repository root; an absolute path or `~/...` also works. The default `data/` folder is git-ignored. Docker Desktop must be allowed to share the location (folders under your home directory are shared by default).
+- `POSTGRES_PASSWORD` applies when the database folder is first initialized. Changing it later requires emptying `POSTGRES_DATA_DIR`, which erases all data.
+- `docker compose down -v` does not delete the data folders. To erase all data, stop the stack and delete both folders.
 
 ### 2. Start the stack
 
@@ -134,7 +140,7 @@ docker compose logs -f add_mcp dates_mcp
 # Rebuild after changing an MCP server
 docker compose up -d --build add_mcp dates_mcp
 
-# Stop the stack and retain database volumes
+# Stop the stack and keep the data folders
 docker compose down
 ```
 

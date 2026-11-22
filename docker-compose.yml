@@ -12,12 +12,6 @@ networks:
     name: neomcp-net
     driver: bridge
 
-volumes:
-  pgdata:
-    name: neomcp-pg-data
-  web_ui_redis_data:
-    name: neomcp-webui-data
-
 services:
   # PostgreSQL - primary database
   postgres:
@@ -65,7 +59,7 @@ services:
     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mysecretpassword}
     - POSTGRES_DB=mcp
     volumes:
-    - pgdata:/var/lib/postgresql
+    - ${POSTGRES_DATA_DIR:-./data/pg-data}:/var/lib/postgresql
     healthcheck:
       interval: 30s
       retries: 5
@@ -459,7 +453,7 @@ services:
     - 'yes'
     networks: [mcpnet]
     volumes:
-    - web_ui_redis_data:/data
+    - ${WEB_UI_DATA_DIR:-./data/webui-data}:/data
     healthcheck:
       interval: 5s
       retries: 10
