@@ -71,6 +71,9 @@ WEB_UI_DATA_DIR=../data/webui-data
 POSTGRES_PASSWORD=<your database password>
 POSTGRES_PORT=15433
 POSTGRES_DATA_DIR=../data/postgres-data
+
+# Redis
+REDIS_PORT=16379
 ENV
 ```
 
