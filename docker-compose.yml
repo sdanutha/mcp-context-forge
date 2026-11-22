@@ -89,59 +89,6 @@ services:
         hard: 5000
         soft: 5000
 
-  # PgBouncer - connection pool in front of PostgreSQL
-  pgbouncer:
-    container_name: neomcp-pgbouncer
-    image: edoburu/pgbouncer:v1.26.1-p0
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks: [mcpnet]
-    ports:
-    - 6432:6432
-    environment:
-    - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@postgres:5432/mcp
-    - LISTEN_PORT=6432
-    - POOL_MODE=transaction
-    - MAX_CLIENT_CONN=5000
-    - DEFAULT_POOL_SIZE=600
-    - MIN_POOL_SIZE=100
-    - RESERVE_POOL_SIZE=150
-    - RESERVE_POOL_TIMEOUT=2
-    - MAX_DB_CONNECTIONS=700
-    - MAX_USER_CONNECTIONS=700
-    - SERVER_LIFETIME=3600
-    - SERVER_IDLE_TIMEOUT=600
-    - QUERY_WAIT_TIMEOUT=60
-    - CLIENT_IDLE_TIMEOUT=120
-    - SERVER_CONNECT_TIMEOUT=5
-    - SERVER_RESET_QUERY=DISCARD ALL
-    - SERVER_RESET_QUERY_ALWAYS=1
-    - IDLE_TRANSACTION_TIMEOUT=30
-    - AUTH_TYPE=scram-sha-256
-    healthcheck:
-      interval: 10s
-      retries: 3
-      start_period: 10s
-      test: [CMD, pg_isready, -h, localhost, -p, '6432']
-      timeout: 5s
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 256M
-        reservations:
-          cpus: '0.5'
-          memory: 128M
-    ulimits:
-      nofile:
-        hard: 65536
-        soft: 65536
-      nproc:
-        hard: 5000
-        soft: 5000
-
   # Redis - Gateway cache and session coordination
   redis:
     container_name: neomcp-redis
@@ -231,7 +178,7 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
-      pgbouncer:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_started
@@ -251,7 +198,7 @@ services:
     - SSRF_ALLOW_LOCALHOST=${SSRF_ALLOW_LOCALHOST:-true}
     - SSRF_ALLOW_PRIVATE_NETWORKS=${SSRF_ALLOW_PRIVATE_NETWORKS:-true}
     - SSRF_DNS_FAIL_CLOSED=${SSRF_DNS_FAIL_CLOSED:-false}
-    - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@pgbouncer:6432/mcp}
+    - DATABASE_URL=${DATABASE_URL:-postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-mysecretpassword}@postgres:5432/mcp}
     - MCPGATEWAY_SKIP_MIGRATIONS=${MCPGATEWAY_SKIP_MIGRATIONS:-true}
     - SQLALCHEMY_ECHO=false
     - CACHE_TYPE=redis
