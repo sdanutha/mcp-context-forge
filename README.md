@@ -34,12 +34,6 @@ ln -s contextforge/.env .env
   uv run --no-project --python 3.12 --with python-dotenv \
     python -m mcpgateway.scripts.init_secrets --patch-env .env
 )
-
-cat >> .env <<'ENV'
-
-GUNICORN_WORKERS=2
-GATEWAY_REPLICAS=1
-ENV
 ```
 
 Secret initialization replaces weak values for `JWT_SECRET_KEY`, `AUTH_ENCRYPTION_SECRET`, and the configured passwords.
