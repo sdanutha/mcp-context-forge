@@ -90,14 +90,13 @@ Custom MCP containers share the internal Docker network with ContextForge and do
 ## Daily commands
 
 ```bash
-# Start all services
-docker compose up -d
+# Start all services, then remove the finished one-shot containers (migration and registration jobs)
+docker compose up -d \
+  && docker compose wait register_add_mcp register_dates_mcp >/dev/null \
+  && docker compose rm -f migration register_add_mcp register_dates_mcp
 
 # Check services, including completed registration jobs
 docker compose ps -a
-
-# Remove finished one-shot containers (migration and registration jobs); the next up -d runs them again
-docker compose rm -f migration register_add_mcp register_dates_mcp
 
 # View custom MCP logs
 docker compose logs -f add_mcp dates_mcp

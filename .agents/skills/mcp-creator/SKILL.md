@@ -51,9 +51,9 @@ Done when `docker compose config --quiet` passes, both services are on `mcpnet`,
 
 ### 4. README
 
-Add the MCP to the example table (virtual server, tool, example arguments, result) in the root `README.md`.
+In the root `README.md`, add the MCP to the example table (virtual server, tool, example arguments, result) and append `register_<name>_mcp` to both the `wait` and `rm -f` parts of the start command under "Daily commands".
 
-Done when the table lists the new MCP.
+Done when the table lists the new MCP and the start command names its registration job twice.
 
 ### 5. Verify
 
