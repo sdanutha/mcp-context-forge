@@ -64,6 +64,7 @@ POSTGRES_PASSWORD=<your database password>
 WEB_UI_PORT=3001
 GATEWAY_PORT=4444
 POSTGRES_DATA_DIR=/path/to/postgres-data
+WEB_UI_DATA_DIR=/path/to/webui-data
 ENV
 ```
 
