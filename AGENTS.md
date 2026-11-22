@@ -62,7 +62,7 @@ Do not modify anything in it. Only the user may change it, for example to update
 
 7. Validate the integration using the checks below.
    Update the root README example table to include the new MCP.
-   Append `register_<name>_mcp` to the `wait` and `rm -f` parts of the README start command that removes finished one-shot containers.
+   Name the registration service `register_<name>_mcp`; the README start command removes every `migration` and `register_*` service on its own, so it needs no edit.
 
 ## Compose template
 

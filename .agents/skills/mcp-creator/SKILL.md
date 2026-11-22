@@ -51,9 +51,9 @@ Done when `docker compose config --quiet` passes, both services are on `mcpnet`,
 
 ### 4. README
 
-In the root `README.md`, add the MCP to the example table (virtual server, tool, example arguments, result) and append `register_<name>_mcp` to both the `wait` and `rm -f` parts of the start command under "Daily commands".
+In the root `README.md`, add the MCP to the example table (virtual server, tool, example arguments, result).
 
-Done when the table lists the new MCP and the start command names its registration job twice.
+Done when the table lists the new MCP. The start command under "Daily commands" needs no edit: it removes every service named `migration` or `register_*`.
 
 ### 5. Verify
 
