@@ -96,6 +96,9 @@ docker compose up -d
 # Check services, including completed registration jobs
 docker compose ps -a
 
+# Remove finished one-shot containers (migration and registration jobs); the next up -d runs them again
+docker compose rm -f migration register_add_mcp register_dates_mcp
+
 # View custom MCP logs
 docker compose logs -f add_mcp dates_mcp
 
